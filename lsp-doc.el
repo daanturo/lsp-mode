@@ -2,7 +2,7 @@
 
 ;; Keywords: languages, tool
 ;; Package-Requires: ((emacs "26.1") (lsp-mode "7.0.1") (emacs "26.1") (dash "2.18.0") (f "0.20.0") (ht "2.3") (spinner "1.7.3") (markdown-mode "2.3") (lv "0"))
-;; Version: 7.1.0
+;; Version: 8.0.0
 
 ;; URL: https://github.com/emacs-lsp/lsp-mode
 ;; This program is free software; you can redistribute it and/or modify
@@ -143,11 +143,17 @@
 (defun lsp-doc--generate-for-client (client)
   "Generate documentation for CLIENT."
   (-let* (((&hash "name") client)
-         (file (file-truename (concat "page/lsp-" name ".md"))))
+          ((&hash "common-group-name") client)
+          (file (file-truename (concat "page/lsp-" name ".md"))))
     (unless (file-exists-p file)
       (copy-file "template/lsp-client.md" file)
       (with-current-buffer (find-file-noselect file)
         (goto-char (point-min))
+        (-if-let* ((base-file (or (symbol-file (intern (format "lsp-%s" (or name common-group-name))))
+                                  (when common-group-name
+                                    (expand-file-name (format "clients/lsp-%s.el" common-group-name) "../.."))
+                                  (expand-file-name (format "clients/lsp-%s.el" name) "../.."))))
+            (insert (format "---\nroot_file: %s\n---\n" (file-relative-name base-file "../.."))))
         (lsp-doc--replace-client-placeholders client)
         (save-buffer 0)
         (lsp-doc--add-client-variables client file)))))
@@ -198,6 +204,8 @@ Make sure to make mkdocs.yml updated as well.")
              (dest-file (file-truename filename)))
         (with-current-buffer (find-file-noselect dest-file)
           (with-temp-buffer
+            (-if-let* ((base-file (symbol-file (car (lsp-doc--variables group)))))
+                (insert (format "---\nroot_file: %s\n---\n" (file-relative-name base-file "../../.."))))
             (insert "# " feature "\n\n")
             (append-to-file (point-min) (point-max) dest-file))
           (lsp-doc--add-feature-variables group dest-file)
@@ -212,6 +220,8 @@ Make sure to make mkdocs.yml updated as well.")
              (dest-file (file-truename filename)))
         (with-current-buffer (find-file-noselect dest-file)
           (with-temp-buffer
+            (-if-let* ((base-file (symbol-file (car (lsp-doc--variables group)))))
+                (insert (format "---\nroot_file: %s\n---\n" (file-relative-name base-file "../../.."))))
             (insert "# " feature "\n\n")
             (append-to-file (point-min) (point-max) dest-file))
           (lsp-doc--add-feature-variables group dest-file)
