@@ -607,14 +607,14 @@ The hook will receive two parameters list of added and removed folders."
   :type 'hook
   :group 'lsp-mode)
 
+(define-obsolete-variable-alias 'lsp-eldoc-hook 'lsp-obsolete-eldoc-hook
+  "lsp-mode 8.1.0")
 (defcustom lsp-obsolete-eldoc-hook '(lsp-obsolete-eldoc-hover)
   "Hooks to run for old versions (< 1.11) of eldoc.
 For newer eldoc, configure `eldoc-documentation-functions'
 instead."
   :type 'hook
   :group 'lsp-mode)
-(define-obsolete-variable-alias 'lsp-eldoc-hook 'lsp-obsolete-eldoc-hook
-  "lsp-mode 8.1.0")
 
 (defcustom lsp-before-apply-edits-hook nil
   "Hooks to run before applying edits."
@@ -1193,11 +1193,9 @@ See #2049"
   "Display lsp error message with FORMAT with ARGS."
   (lsp--message "%s :: %s" (propertize "LSP" 'face 'error) (apply #'format format args)))
 
-(defvar-local lsp--obsolete-eldoc-saved-message nil)
-
 (defun lsp--obsolete-eldoc-message (&optional msg)
   "Show MSG in eldoc."
-  (setq lsp--obsolete-eldoc-saved-message msg)
+  (setq lsp--eldoc-saved-message msg)
   (run-with-idle-timer 0 nil (lambda ()
                                (with-no-warnings
                                  (eldoc-message msg)))))
@@ -5103,6 +5101,31 @@ If EXCLUDE-DECLARATION is non-nil, request the server to include declarations."
          :mode 'tick
          :cancel-token :eldoc-hover)))))
 
+(defun lsp-obsolete-eldoc-hover ()
+  "Display hover info (based on `textDocument/signatureHelp')."
+  (if (and lsp--hover-saved-bounds
+           (lsp--point-in-bounds-p lsp--hover-saved-bounds))
+      (lsp--obsolete-eldoc-message lsp--eldoc-saved-message)
+    (setq lsp--hover-saved-bounds nil
+          lsp--eldoc-saved-message nil)
+    (if (looking-at "[[:space:]\n]")
+        (lsp--obsolete-eldoc-message nil)
+      (when (and lsp-eldoc-enable-hover (lsp-feature? "textDocument/hover"))
+        (lsp-request-async
+         "textDocument/hover"
+         (lsp--text-document-position-params)
+         (-lambda ((hover &as &Hover? :range? :contents))
+           (when hover
+             (when range?
+               (setq lsp--hover-saved-bounds (lsp--range-to-region range?)))
+             (lsp--obsolete-eldoc-message (and contents
+                                               (lsp--render-on-hover-content
+                                                contents
+                                                lsp-eldoc-render-all)))))
+         :error-handler #'ignore
+         :mode 'tick
+         :cancel-token :eldoc-hover)))))
+
 (defun lsp--point-on-highlight? ()
   (-some? (lambda (overlay)
             (overlay-get overlay 'lsp-highlight))
@@ -5696,33 +5719,6 @@ It will show up only if current point has signature help."
      :cancel-token :document-color-token)))
 
 
-
-(defvar-local lsp--obsolete-eldoc-hover-saved-bounds nil)
-
-(defun lsp-obsolete-eldoc-hover ()
-  "Display hover info (based on `textDocument/signatureHelp')."
-  (if (and lsp--obsolete-eldoc-hover-saved-bounds
-           (lsp--point-in-bounds-p lsp--obsolete-eldoc-hover-saved-bounds))
-      (lsp--obsolete-eldoc-message lsp--obsolete-eldoc-saved-message)
-    (setq lsp--obsolete-eldoc-hover-saved-bounds nil
-          lsp--obsolete-eldoc-saved-message nil)
-    (if (looking-at "[[:space:]\n]")
-        (lsp--obsolete-eldoc-message nil)
-      (when (and lsp-eldoc-enable-hover (lsp-feature? "textDocument/hover"))
-        (lsp-request-async
-         "textDocument/hover"
-         (lsp--text-document-position-params)
-         (-lambda ((hover &as &Hover? :range? :contents))
-           (when hover
-             (when range?
-               (setq lsp--obsolete-eldoc-hover-saved-bounds (lsp--range-to-region range?)))
-             (lsp--obsolete-eldoc-message (and contents
-                                               (lsp--render-on-hover-content
-                                                contents
-                                                lsp-eldoc-render-all)))))
-         :error-handler #'ignore
-         :mode 'tick
-         :cancel-token :eldoc-hover)))))
 
 (defun lsp--action-trigger-parameter-hints (_command)
   "Handler for editor.action.triggerParameterHints."
