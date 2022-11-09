@@ -607,7 +607,14 @@ The hook will receive two parameters list of added and removed folders."
   :type 'hook
   :group 'lsp-mode)
 
-(make-obsolete 'lsp-eldoc-hook 'eldoc-documentation-functions "lsp-mode 8.0.0")
+(defcustom lsp-obsolete-eldoc-hook '(lsp-obsolete-eldoc-hover)
+  "Hooks to run for old versions (< 1.11) of eldoc.
+For newer eldoc, configure `eldoc-documentation-functions'
+instead."
+  :type 'hook
+  :group 'lsp-mode)
+(define-obsolete-variable-alias 'lsp-eldoc-hook 'lsp-obsolete-eldoc-hook
+  "lsp-mode 8.1.0")
 
 (defcustom lsp-before-apply-edits-hook nil
   "Hooks to run before applying edits."
@@ -1185,6 +1192,15 @@ See #2049"
 (defun lsp--error (format &rest args)
   "Display lsp error message with FORMAT with ARGS."
   (lsp--message "%s :: %s" (propertize "LSP" 'face 'error) (apply #'format format args)))
+
+(defvar-local lsp--obsolete-eldoc-saved-message nil)
+
+(defun lsp--obsolete-eldoc-message (&optional msg)
+  "Show MSG in eldoc."
+  (setq lsp--obsolete-eldoc-saved-message msg)
+  (run-with-idle-timer 0 nil (lambda ()
+                               (with-no-warnings
+                                 (eldoc-message msg)))))
 
 (defun lsp-log (format &rest args)
   "Log message to the ’*lsp-log*’ buffer.
@@ -3957,13 +3973,24 @@ yet."
   (lsp-disconnect)
   (lsp))
 
+(defun lsp-managed-mode--configure-eldoc ()
+  (pcase `[,lsp-managed-mode ,(<= 28 emacs-major-version)]
+    ('[t t] (add-hook 'eldoc-documentation-functions
+                      #'lsp-eldoc-function nil t))
+    ('[nil t] (remove-hook 'eldoc-documentation-functions
+                           #'lsp-eldoc-function t))
+    ('[t nil] (add-function :before-until (local 'eldoc-documentation-function)
+                            #'lsp-obsolete-eldoc-function))
+    ('[nil nil] (remove-function (local 'eldoc-documentation-function)
+                                 #'lsp-obsolete-eldoc-function))))
+
 (define-minor-mode lsp-managed-mode
   "Mode for source buffers managed by lsp-mode."
   :lighter nil
   (cond
    (lsp-managed-mode
     (when (lsp-feature? "textDocument/hover")
-      (add-hook 'eldoc-documentation-functions #'lsp-eldoc-function nil t)
+      (lsp-managed-mode--configure-eldoc)
       (eldoc-mode 1))
 
     (add-hook 'after-change-functions #'lsp-on-change nil t)
@@ -3999,7 +4026,7 @@ yet."
    (t
     (lsp-unconfig-buffer)
 
-    (remove-hook 'eldoc-documentation-functions #'lsp-eldoc-function t)
+    (lsp-managed-mode--configure-eldoc)
     (remove-hook 'post-command-hook #'lsp--post-command t)
     (remove-hook 'after-change-functions #'lsp-on-change t)
     (remove-hook 'after-revert-hook #'lsp-on-revert t)
@@ -5043,6 +5070,11 @@ If EXCLUDE-DECLARATION is non-nil, request the server to include declarations."
    (->> lsp--cur-workspace lsp--workspace-client lsp--client-response-handlers (remhash id))
    (lsp-notify "$/cancelRequest" `(:id ,id))))
 
+(defun lsp-obsolete-eldoc-function ()
+  "`lsp-mode' eldoc function."
+  (run-hooks 'lsp-obsolete-eldoc-hook)
+  eldoc-last-message)
+
 (defvar-local lsp--hover-saved-bounds nil)
 
 (defun lsp-eldoc-function (cb &rest _ignored)
@@ -5663,6 +5695,33 @@ It will show up only if current point has signature help."
      :cancel-token :document-color-token)))
 
 
+
+(defvar-local lsp--obsolete-eldoc-hover-saved-bounds nil)
+
+(defun lsp-obsolete-eldoc-hover ()
+  "Display hover info (based on `textDocument/signatureHelp')."
+  (if (and lsp--obsolete-eldoc-hover-saved-bounds
+           (lsp--point-in-bounds-p lsp--obsolete-eldoc-hover-saved-bounds))
+      (lsp--obsolete-eldoc-message lsp--obsolete-eldoc-saved-message)
+    (setq lsp--obsolete-eldoc-hover-saved-bounds nil
+          lsp--obsolete-eldoc-saved-message nil)
+    (if (looking-at "[[:space:]\n]")
+        (lsp--obsolete-eldoc-message nil)
+      (when (and lsp-eldoc-enable-hover (lsp--capability :hoverProvider))
+        (lsp-request-async
+         "textDocument/hover"
+         (lsp--text-document-position-params)
+         (-lambda ((hover &as &Hover? :range? :contents))
+           (when hover
+             (when range?
+               (setq lsp--obsolete-eldoc-hover-saved-bounds (lsp--range-to-region range?)))
+             (lsp--obsolete-eldoc-message (and contents
+                                               (lsp--render-on-hover-content
+                                                contents
+                                                lsp-eldoc-render-all)))))
+         :error-handler #'ignore
+         :mode 'tick
+         :cancel-token :eldoc-hover)))))
 
 (defun lsp--action-trigger-parameter-hints (_command)
   "Handler for editor.action.triggerParameterHints."
