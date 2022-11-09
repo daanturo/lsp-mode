@@ -576,6 +576,29 @@ The hook will receive two parameters list of added and removed folders."
   :type 'hook
   :group 'lsp-mode)
 
+(when (and (< emacs-major-version 28)
+           ;;  Checking (`boundp' `eldoc-documentation-strategy') isn't enough
+           ;; as it may be set before loading this (in that case `boundp'
+           ;; returns true even when not loaded).
+
+           ;; For Emacs<28, new `eldoc.el' will define
+           ;; `eldoc-documentation-strategy' as an alias of
+           ;; `eldoc-documentation-function', so it not being a alias indicates
+           ;; that new `eldoc' hasn't been loaded yet.
+           (equal (indirect-variable 'eldoc-documentation-strategy)
+                  'eldoc-documentation-strategy))
+  (let ((lsp--user--eldoc-documentation-strategy
+         (and (boundp 'eldoc-documentation-strategy)
+              (default-value 'eldoc-documentation-strategy))))
+    (load "eldoc")
+    ;; Loading new `eldoc' late may set `eldoc-documentation-function' to
+    ;; `ignore', therefore no auto signature hints at all!
+    (when (memq (default-value 'eldoc-documentation-function) '(nil ignore))
+      ;; restore user setting, or if unset then our recommendation
+      (setq-default eldoc-documentation-strategy
+                    (or lsp--user--eldoc-documentation-strategy
+                        #'eldoc-documentation-compose-eagerly)))))
+
 (make-obsolete 'lsp-eldoc-hook 'eldoc-documentation-functions "lsp-mode 8.0.0")
 
 (defcustom lsp-before-apply-edits-hook nil
