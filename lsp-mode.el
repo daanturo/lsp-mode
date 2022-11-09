@@ -5086,18 +5086,19 @@ If EXCLUDE-DECLARATION is non-nil, request the server to include declarations."
           lsp--eldoc-saved-message nil)
     (if (looking-at "[[:space:]\n]")
         (setq lsp--eldoc-saved-message nil) ; And returns nil.
-      (when (and lsp-eldoc-enable-hover (lsp--capability :hoverProvider))
+      (when (and lsp-eldoc-enable-hover (lsp-feature? "textDocument/hover"))
         (lsp-request-async
          "textDocument/hover"
          (lsp--text-document-position-params)
          (-lambda ((hover &as &Hover? :range? :contents))
-           (setq lsp--hover-saved-bounds (when range?
-                                           (lsp--range-to-region range?)))
-           (funcall cb (setq lsp--eldoc-saved-message
-                             (when contents
-                               (lsp--render-on-hover-content
-                                contents
-                                lsp-eldoc-render-all)))))
+           (when hover
+             (when range?
+               (setq lsp--hover-saved-bounds (lsp--range-to-region range?)))
+             (let ((msg (and contents
+                             (lsp--render-on-hover-content
+                              contents
+                              lsp-eldoc-render-all))))
+               (funcall cb (setq lsp--eldoc-saved-message msg)))))
          :error-handler #'ignore
          :mode 'tick
          :cancel-token :eldoc-hover)))))
@@ -5707,7 +5708,7 @@ It will show up only if current point has signature help."
           lsp--obsolete-eldoc-saved-message nil)
     (if (looking-at "[[:space:]\n]")
         (lsp--obsolete-eldoc-message nil)
-      (when (and lsp-eldoc-enable-hover (lsp--capability :hoverProvider))
+      (when (and lsp-eldoc-enable-hover (lsp-feature? "textDocument/hover"))
         (lsp-request-async
          "textDocument/hover"
          (lsp--text-document-position-params)
