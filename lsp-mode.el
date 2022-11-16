@@ -3957,6 +3957,12 @@ yet."
   (lsp-disconnect)
   (lsp))
 
+;; https://github.com/emacs-lsp/lsp-mode/issues/3295#issuecomment-1308994099
+(when (and (< emacs-major-version 28)
+           (equal (indirect-variable 'eldoc-documentation-strategy)
+                  'eldoc-documentation-strategy))
+  (load "eldoc"))
+
 (define-minor-mode lsp-managed-mode
   "Mode for source buffers managed by lsp-mode."
   :lighter nil
@@ -3964,7 +3970,10 @@ yet."
    (lsp-managed-mode
     (when (lsp-feature? "textDocument/hover")
       (add-hook 'eldoc-documentation-functions #'lsp-eldoc-function nil t)
-      (eldoc-mode 1))
+      (eldoc-mode 1)
+      (when (< emacs-major-version 28)
+        (setq-local eldoc-documentation-strategy
+                    'eldoc-documentation-default)))
 
     (add-hook 'after-change-functions #'lsp-on-change nil t)
     (add-hook 'after-revert-hook #'lsp-on-revert nil t)
@@ -4000,6 +4009,7 @@ yet."
     (lsp-unconfig-buffer)
 
     (remove-hook 'eldoc-documentation-functions #'lsp-eldoc-function t)
+    (when (< emacs-major-version 28) (kill-local-variable 'eldoc-documentation-strategy))
     (remove-hook 'post-command-hook #'lsp--post-command t)
     (remove-hook 'after-change-functions #'lsp-on-change t)
     (remove-hook 'after-revert-hook #'lsp-on-revert t)
