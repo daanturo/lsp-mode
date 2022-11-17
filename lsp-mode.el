@@ -58,6 +58,7 @@
 (require 'help-mode)
 (require 'yasnippet nil t)
 (require 'lsp-protocol)
+(eval-when-compile (load "eldoc"))    ; for CI, but when not compiled this may override user setting
 
 (defgroup lsp-mode nil
   "Language Server Protocol client."
@@ -3959,20 +3960,11 @@ yet."
 
 ;; TODO remove those when dropping support for Emacs 27
 ;; https://github.com/emacs-lsp/lsp-mode/issues/3295#issuecomment-1308994099
-(eval-when-compile (load "eldoc"))    ; for CI, but when not compiled this may override user setting
 (when (< emacs-major-version 28)
-  ;; in case new eldoc.el is loaded before (eg. by eglot)
-  (defvar lsp--eldoc-documentation-strategy
-    (--> (and (boundp 'eldoc-documentation-strategy)
-              (default-value 'eldoc-documentation-strategy))
-         (if (memq it '(nil ignore))
-             #'eldoc-documentation-compose-eagerly
-           it)))
   (unless (boundp 'eldoc-documentation-functions)
     (load "eldoc"))
   (when (memq (default-value 'eldoc-documentation-strategy) '(nil ignore))
-    (setq-default eldoc-documentation-strategy
-                  lsp--eldoc-documentation-strategy)))
+    (setq-default eldoc-documentation-strategy #'eldoc-documentation-default)))
 
 (define-minor-mode lsp-managed-mode
   "Mode for source buffers managed by lsp-mode."
