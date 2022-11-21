@@ -25,6 +25,7 @@
 ;;; Code:
 
 (require 'lsp-mode)
+(require 'json)
 
 ;;; Ansible
 (defgroup lsp-ansible nil
@@ -55,35 +56,43 @@ not configured for the task."
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
-(defcustom lsp-ansible-ansible-lint-arguments ""
+(defcustom lsp-ansible-validation-enabled t
+  "Toggle validation provider.
+If enabled and ansible-lint is disabled, validation falls back to
+ansible-playbook --syntax-check."
+  :type 'boolean
+  :group 'lsp-ansible
+  :package-version '(lsp-mode . "8.0.1"))
+
+(defcustom lsp-ansible-validation-lint-arguments ""
   "Optional command line arguments to be appended to ansible-lint invocation.
 See ansible-lint documentation."
   :type 'string
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
-(defcustom lsp-ansible-ansible-lint-enabled t
+(defcustom lsp-ansible-validation-lint-enabled t
   "Enables/disables use of ansible-lint."
   :type 'boolean
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
-(defcustom lsp-ansible-ansible-lint-path "ansible-lint"
+(defcustom lsp-ansible-validation-lint-path "ansible-lint"
   "Path to the ansible-lint executable.
 $PATH is searched for the executable."
   :type 'string
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
-(defcustom lsp-ansible-ansible-navigator-path "ansible-navigator"
-  "Path to the ansible-navigator executable."
-  :type 'string
+(defcustom lsp-ansible-completion-provide-redirect-modules t
+  "Toggle redirected module provider when completing modules."
+  :type 'boolean
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
-(defcustom lsp-ansible-ansible-playbook-path "ansible-playbook"
-  "Path to the ansible-playbook executable."
-  :type 'string
+(defcustom lsp-ansible-completion-provide-module-option-aliases t
+  "Toggle alias provider when completing module options."
+  :type 'boolean
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
@@ -123,6 +132,32 @@ if not locally available."
   :group 'lsp-ansible
   :package-version '(lsp-mode . "8.0.1"))
 
+(defcustom lsp-ansible-execution-environment-pull-arguments ""
+  "Specify any additional parameters for the pull command.
+Example: ‘--tls-verify=false’"
+  :type 'string
+  :group 'lsp-ansible
+  :package-version '(lsp-mode . "8.0.1"))
+
+(defcustom lsp-ansible-execution-environment-container-options ""
+  "Extra parameters passed to the container engine command.
+Example: ‘-–net=host’"
+  :type 'string
+  :group 'lsp-ansible
+  :package-version '(lsp-mode . "8.0.1"))
+
+(defcustom lsp-ansible-execution-environment-volume-mounts []
+  "Additonnal volumes to mount in container.
+The value is a vector of plists.  Expected properties are:
+- src: the name of the local volume or path to be mounted within execution
+  environment
+- dest: the path where the file or directory are mounted in the container
+- options: the property is optional, and is a comma-separated list of options.
+  Example: ro,Z"
+  :type '(lsp-repeatable-vector plist)
+  :group 'lsp-ansible
+  :package-version '(lsp-mode . "8.0.1"))
+
 (defcustom lsp-ansible-python-interpreter-path ""
   "Path to the python/python3 executable.
 This setting may be used to make the extension work with ansible and
@@ -147,24 +182,48 @@ Python virtual environment."
 (lsp-register-custom-settings
  '(("ansible.ansible.path" lsp-ansible-ansible-path)
    ("ansible.ansible.useFullyQualifiedCollectionNames" lsp-ansible-use-fully-qualified-collection-names t)
-   ("ansible.ansibleLint.arguments" lsp-ansible-ansible-lint-arguments)
-   ("ansible.ansibleLint.enabled" lsp-ansible-ansible-lint-enabled t)
-   ("ansible.ansibleLint.path" lsp-ansible-ansible-lint-path)
-   ("ansible.ansibleNavigator.path" lsp-ansible-ansible-navigator-path)
-   ("ansible.ansiblePlaybook.path" lsp-ansible-ansible-playbook-path)
+   ("ansible.validation.enabled" lsp-ansible-validation-enabled t)
+   ("ansible.validation.lint.arguments" lsp-ansible-validation-lint-arguments)
+   ("ansible.validation.lint.enabled" lsp-ansible-validation-lint-enabled t)
+   ("ansible.validation.lint.path" lsp-ansible-validation-lint-path)
+   ("ansible.completion.provideRedirectModules" lsp-ansible-completion-provide-redirect-modules t)
+   ("ansible.completion.provideModuleOptionAliases" lsp-ansible-completion-provide-module-option-aliases t)
    ("ansible.executionEnvironment.containerEngine" lsp-ansible-execution-environment-container-engine)
    ("ansible.executionEnvironment.enabled" lsp-ansible-execution-environment-enabled t)
    ("ansible.executionEnvironment.image" lsp-ansible-execution-environment-image)
-   ("ansible.executionEnvironment.pullPolicy" lsp-ansible-execution-environment-pull-policy)
+   ("ansible.executionEnvironment.pull.policy" lsp-ansible-execution-environment-pull-policy)
+   ("ansible.executionEnvironment.pull.arguments" lsp-ansible-execution-environment-pull-arguments)
+   ("ansible.executionEnvironment.containerOptions" lsp-ansible-execution-environment-container-options)
+   ("ansible.executionEnvironment.volumeMounts" lsp-ansible-execution-environment-volume-mounts)
    ("ansible.python.interpreterPath" lsp-ansible-python-interpreter-path)
    ("ansible.python.activationScript" lsp-ansible-python-activation-script)))
 
 (defun lsp-ansible-check-ansible-minor-mode (&rest _)
   "Check whether ansible minor mode is active.
 This prevents the Ansible server from being turned on in all yaml files."
-  (and (eq major-mode 'yaml-mode)
+  (and (derived-mode-p 'yaml-mode)
        ;; emacs-ansible provides ansible, not ansible-mode
        (with-no-warnings (bound-and-true-p ansible))))
+
+(declare-function lsp-completion--clear-cache "lsp-completion" (&optional keep-last-result))
+
+(defun lsp-ansible-resync-inventory ()
+  "Resync the inventory cache used by Ansible Language Server for hosts completion."
+  (interactive)
+  (lsp-notify "resync/ansible-inventory" nil)
+  (require 'lsp-completion)
+  (lsp-completion--clear-cache))
+
+(defun lsp-ansible-update-metadata-handler (_workspace params)
+  "Handler for `update/ansible-metadata' notification.
+Pretty print the content of PARAMS."
+  (let ((json-encoding-pretty-print t))
+    (message "Ansible Language Server metadata: %s" (json-encode params))))
+
+(defun lsp-ansible-show-server-metadata ()
+  "Show informations about Ansible environment used by the Ansible Language Server."
+  (interactive)
+  (lsp-notify "update/ansible-metadata" nil))
 
 (lsp-register-client
  (make-lsp-client
@@ -175,6 +234,7 @@ This prevents the Ansible server from being turned on in all yaml files."
                             (lsp-package-path 'ansible-language-server))
                        ,@(cl-rest lsp-ansible-language-server-command))))
   :priority 1
+  :notification-handlers (ht ("update/ansible-metadata" #'lsp-ansible-update-metadata-handler))
   :activation-fn #'lsp-ansible-check-ansible-minor-mode
   :server-id 'ansible-ls
   :download-server-fn (lambda (_client callback error-callback _update?)

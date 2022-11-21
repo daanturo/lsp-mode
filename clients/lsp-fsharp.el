@@ -138,8 +138,7 @@ opened module/namespace."
   :package-version '(lsp-mode . "6.2"))
 
 (defcustom lsp-fsharp-enable-reference-code-lens t
-  "Enables reference count code lenses.
-It is recommended to disable if `--background-service-enabled' is not used."
+  "Enables reference count code lenses."
   :group 'lsp-fsharp
   :type 'boolean
   :package-version '(lsp-mode . "6.2"))
@@ -167,6 +166,25 @@ UPDATE? is t."
    error-callback
    "dotnet" "tool" (if update? "update" "install") "-g" "fsautocomplete"))
 
+(defcustom lsp-fsharp-use-dotnet-tool-for-fsac t
+  "Run FsAutoComplete as a dotnet tool.
+
+The binary will be invoked via \"dotnet fsautocomplete\" in the
+project's root directory, which will run a project-local tool if
+available, else the globally installed tool."
+  :group 'lsp-fsharp
+  :type 'boolean
+  :risky t)
+
+(defun lsp-fsharp--fsac-cmd ()
+  "The location of fsautocomplete executable."
+  (or (-let [maybe-local-executable (expand-file-name "fsautocomplete" lsp-fsharp-server-install-dir)]
+        (when (f-exists-p maybe-local-executable)
+          maybe-local-executable))
+      (executable-find "fsautocomplete")
+      (f-join (or (getenv "USERPROFILE") (getenv "HOME"))
+              ".dotnet" "tools" "fsautocomplete")))
+
 (defun lsp-fsharp--make-launch-cmd ()
   "Build the command required to launch fsautocomplete."
 
@@ -189,18 +207,17 @@ UPDATE? is t."
                                 (list "/bin/ksh" "-c"))
 
                                (t nil)))
-
-        (fsautocomplete-exec (or (executable-find "fsautocomplete")
-                                 (f-join (or (getenv "USERPROFILE") (getenv "HOME"))
-                                         ".dotnet" "tools" "fsautocomplete"))))
+        (fsautocomplete-exec (lsp-fsharp--fsac-cmd)))
     (append startup-wrapper
-            (list fsautocomplete-exec "--background-service-enabled")
+            (list fsautocomplete-exec)
             lsp-fsharp-server-args)))
 
 (defun lsp-fsharp--test-fsautocomplete-present ()
   "Return non-nil if dotnet tool fsautocomplete is installed globally."
-  (string-match-p "fsautocomplete"
-                  (shell-command-to-string "dotnet tool list -g")))
+  (if lsp-fsharp-use-dotnet-tool-for-fsac
+      (string-match-p "fsautocomplete"
+                      (shell-command-to-string "dotnet tool list -g"))
+    (f-exists? (lsp-fsharp--fsac-cmd))))
 
 (defun lsp-fsharp--project-list ()
   "Get the list of files we need to send to fsharp/workspaceLoad."

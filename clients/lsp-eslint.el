@@ -120,7 +120,14 @@ source.fixAll code action."
   :package-version '(lsp-mode . "6.3"))
 
 (defcustom lsp-eslint-working-directories []
-  ""
+  "A vector of working directory names to use. Can be a pattern, an absolute path
+or a path relative to the workspace. Examples:
+ - \"/home/user/abc/\"
+ - \"abc/\"
+ - (directory \"abc\") which is equivalent to \"abc\" above
+ - (pattern \"abc/*\")
+Note that the home directory reference ~/ is not currently supported, use
+/home/[user]/ instead."
   :type 'lsp-string-vector
   :package-version '(lsp-mode . "6.3"))
 
@@ -260,26 +267,49 @@ stored."
                                (buffer (find-buffer-visiting file))
                                (workspace-folder (lsp-find-session-folder (lsp-session) file)))
                     (with-current-buffer buffer
-                      (list :validate (if (member (lsp-buffer-language) lsp-eslint-validate) "on" "probe")
-                            :packageManager lsp-eslint-package-manager
-                            :codeAction (list
-                                         :disableRuleComment (list
-                                                              :enable (lsp-json-bool lsp-eslint-code-action-disable-rule-comment)
-                                                              :location lsp-eslint-code-action-disable-rule-comment-location)
-                                         :showDocumentation (list
-                                                             :enable (lsp-json-bool lsp-eslint-code-action-show-documentation)))
-                            :codeActionOnSave (list :enable (lsp-json-bool lsp-eslint-auto-fix-on-save)
-                                                    :mode lsp-eslint-fix-all-problem-type)
-                            :format (lsp-json-bool lsp-eslint-format)
-                            :quiet (lsp-json-bool lsp-eslint-quiet)
-                            :onIgnoredFiles (if lsp-eslint-warn-on-ignored-files "warn" "off")
-                            :options (or lsp-eslint-options (ht))
-                            :rulesCustomizations lsp-eslint-rules-customizations
-                            :run lsp-eslint-run
-                            :nodePath lsp-eslint-node-path
-                            :workspaceFolder (list :uri (lsp--path-to-uri workspace-folder)
-                                                   :name (f-filename workspace-folder)))))))
+                      (let ((working-directory (lsp-eslint--working-directory workspace-folder file)))
+                        (list :validate (if (member (lsp-buffer-language) lsp-eslint-validate) "on" "probe")
+                              :packageManager lsp-eslint-package-manager
+                              :codeAction (list
+                                           :disableRuleComment (list
+                                                                :enable (lsp-json-bool lsp-eslint-code-action-disable-rule-comment)
+                                                                :location lsp-eslint-code-action-disable-rule-comment-location)
+                                           :showDocumentation (list
+                                                               :enable (lsp-json-bool lsp-eslint-code-action-show-documentation)))
+                              :codeActionOnSave (list :enable (lsp-json-bool lsp-eslint-auto-fix-on-save)
+                                                      :mode lsp-eslint-fix-all-problem-type)
+                              :format (lsp-json-bool lsp-eslint-format)
+                              :quiet (lsp-json-bool lsp-eslint-quiet)
+                              :onIgnoredFiles (if lsp-eslint-warn-on-ignored-files "warn" "off")
+                              :options (or lsp-eslint-options (ht))
+                              :rulesCustomizations lsp-eslint-rules-customizations
+                              :run lsp-eslint-run
+                              :nodePath lsp-eslint-node-path
+                              :workingDirectory (when working-directory
+                                                  (list
+                                                   :directory working-directory
+                                                   :!cwd :json-false))
+                              :workspaceFolder (list :uri (lsp--path-to-uri workspace-folder)
+                                                     :name (f-filename workspace-folder))))))))
        (apply #'vector)))
+
+(defun lsp-eslint--working-directory (workspace current-file)
+  "Find the first directory in the parameter config.workingDirectories which
+contains the current file"
+  (let ((directories (-map (lambda (dir)
+                             (when (and (listp dir) (plist-member dir 'directory))
+                               (setq dir (plist-get dir 'directory)))
+                             (if (and (listp dir) (plist-member dir 'pattern))
+                               (progn
+                                 (setq dir (plist-get dir 'pattern))
+                                 (when (not (f-absolute? dir))
+                                   (setq dir (f-join workspace dir)))
+                                 (f-glob dir))
+                               (if (f-absolute? dir)
+                                 dir
+                                 (f-join workspace dir))))
+                           (append lsp-eslint-working-directories nil))))
+    (-first (lambda (dir) (f-ancestor-of-p dir current-file)) (-flatten directories))))
 
 (lsp-defun lsp-eslint--open-doc (_workspace (&eslint:OpenESLintDocParams :url))
   "Open documentation."

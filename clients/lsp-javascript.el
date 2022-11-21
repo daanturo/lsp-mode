@@ -281,6 +281,11 @@ Requires using TypeScript 2.3.0 or newer in the workspace."
   :type 'boolean
   :package-version '(lsp-mode . "6.1"))
 
+(defcustom lsp-typescript-format-insert-space-after-opening-and-before-closing-empty-braces nil
+  "Defines space handling after opening/before closing empty braces."
+  :type 'boolean
+  :package-version '(lsp-mode . "6.1"))
+
 (defcustom lsp-typescript-format-insert-space-after-opening-and-before-closing-nonempty-parenthesis nil
   "Defines space handling after opening/before closing non-empty parenthesis."
   :type 'boolean
@@ -366,6 +371,11 @@ Requires using TypeScript 2.3.0 or newer in the workspace."
 
 (defcustom lsp-javascript-format-insert-space-before-function-parenthesis nil
   "Defines space handling before function argument parentheses."
+  :type 'boolean
+  :package-version '(lsp-mode . "6.1"))
+
+(defcustom lsp-javascript-format-insert-space-after-opening-and-before-closing-empty-braces nil
+  "Defines space handling after opening/before closing empty braces."
   :type 'boolean
   :package-version '(lsp-mode . "6.1"))
 
@@ -664,6 +674,11 @@ name (e.g. `data' variable passed as `data' parameter)."
   :type 'boolean
   :package-version '(lsp-mode . "8.0.1"))
 
+(defcustom lsp-javascript-completions-complete-function-calls t
+  "Complete function calls."
+  :type 'boolean
+  :package-version '(lsp-mode . "8.0.1"))
+
 (lsp-register-custom-settings
  '(("javascript.autoClosingTags" lsp-javascript-auto-closing-tags t)
    ("javascript.implicitProjectConfig.checkJs" lsp-javascript-implicit-project-config-check-js t)
@@ -687,6 +702,7 @@ name (e.g. `data' variable passed as `data' parameter)."
    ("javascript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions" lsp-javascript-format-insert-space-after-function-keyword-for-anonymous-functions t)
    ("javascript.format.insertSpaceAfterKeywordsInControlFlowStatements" lsp-javascript-format-insert-space-after-keywords-in-control-flow-statements t)
    ("javascript.format.insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces" lsp-javascript-format-insert-space-after-opening-and-before-closing-jsx-expression-braces t)
+   ("javascript.format.insertSpaceAfterOpeningAndBeforeClosingEmptyBraces" lsp-javascript-format-insert-space-after-opening-and-before-closing-empty-braces t)
    ("javascript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces" lsp-javascript-format-insert-space-after-opening-and-before-closing-nonempty-braces t)
    ("javascript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets" lsp-javascript-format-insert-space-after-opening-and-before-closing-nonempty-brackets t)
    ("javascript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis" lsp-javascript-format-insert-space-after-opening-and-before-closing-nonempty-parenthesis t)
@@ -727,6 +743,7 @@ name (e.g. `data' variable passed as `data' parameter)."
    ("typescript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions" lsp-typescript-format-insert-space-after-function-keyword-for-anonymous-functions t)
    ("typescript.format.insertSpaceAfterKeywordsInControlFlowStatements" lsp-typescript-format-insert-space-after-keywords-in-control-flow-statements t)
    ("typescript.format.insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces" lsp-typescript-format-insert-space-after-opening-and-before-closing-jsx-expression-braces t)
+   ("typescript.format.insertSpaceAfterOpeningAndBeforeClosingEmptyBraces" lsp-typescript-format-insert-space-after-opening-and-before-closing-empty-braces t)
    ("typescript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces" lsp-typescript-format-insert-space-after-opening-and-before-closing-nonempty-braces t)
    ("typescript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets" lsp-typescript-format-insert-space-after-opening-and-before-closing-nonempty-brackets t)
    ("typescript.format.insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis" lsp-typescript-format-insert-space-after-opening-and-before-closing-nonempty-parenthesis t)
@@ -750,7 +767,8 @@ name (e.g. `data' variable passed as `data' parameter)."
    ("javascript.inlayHints.includeInlayParameterNameHints" lsp-javascript-display-parameter-name-hints nil)
    ("javascript.inlayHints.includeInlayParameterNameHintsWhenArgumentMatchesName" lsp-javascript-display-parameter-name-hints-when-argument-matches-name t)
    ("javascript.inlayHints.includeInlayPropertyDeclarationTypeHints" lsp-javascript-display-property-declaration-type-hints t)
-   ("javascript.inlayHints.includeInlayVariableTypeHints" lsp-javascript-display-variable-type-hints t)))
+   ("javascript.inlayHints.includeInlayVariableTypeHints" lsp-javascript-display-variable-type-hints t)
+   ("completions.completeFunctionCalls" lsp-javascript-completions-complete-function-calls t)))
 
 (lsp-dependency 'typescript-language-server
                 '(:system lsp-clients-typescript-tls-path)
@@ -884,17 +902,30 @@ name (e.g. `data' variable passed as `data' parameter)."
                   :priority -2
                   :completion-in-comments? t
                   :initialization-options (lambda ()
-                                            (list :disableAutomaticTypingAcquisition lsp-clients-typescript-disable-automatic-typing-acquisition
-                                                  :logVerbosity lsp-clients-typescript-log-verbosity
-                                                  :maxTsServerMemory lsp-clients-typescript-max-ts-server-memory
-                                                  :npmLocation lsp-clients-typescript-npm-location
-                                                  :plugins lsp-clients-typescript-plugins
-                                                  :preferences lsp-clients-typescript-preferences))
+                                            (append
+                                             (when lsp-clients-typescript-disable-automatic-typing-acquisition
+                                               (list :disableAutomaticTypingAcquisition lsp-clients-typescript-disable-automatic-typing-acquisition))
+                                             (when lsp-clients-typescript-log-verbosity
+                                               (list :logVerbosity lsp-clients-typescript-log-verbosity))
+                                             (when lsp-clients-typescript-max-ts-server-memory
+                                               (list :maxTsServerMemory lsp-clients-typescript-max-ts-server-memory))
+                                             (when lsp-clients-typescript-npm-location
+                                               (list :npmLocation lsp-clients-typescript-npm-location))
+                                             (when lsp-clients-typescript-plugins
+                                               (list :plugins lsp-clients-typescript-plugins))
+                                             (when lsp-clients-typescript-preferences
+                                               (list :preferences lsp-clients-typescript-preferences))))
                   :initialized-fn (lambda (workspace)
                                     (with-lsp-workspace workspace
                                       (lsp--set-configuration
                                        (ht-merge (lsp-configuration-section "javascript")
-                                                 (lsp-configuration-section "typescript")))))
+                                                 (lsp-configuration-section "typescript")
+                                                 (lsp-configuration-section "completions")
+                                                 (lsp-configuration-section "diagnostics"))))
+                                    (let ((caps (lsp--workspace-server-capabilities workspace))
+                                          (format-enable (or lsp-javascript-format-enable lsp-typescript-format-enable)))
+                                      (lsp:set-server-capabilities-document-formatting-provider? caps format-enable)
+                                      (lsp:set-server-capabilities-document-range-formatting-provider? caps format-enable)))
                   :after-open-fn (lambda ()
                                    (when lsp-javascript-display-inlay-hints
                                      (lsp-javascript-inlay-hints-mode)))

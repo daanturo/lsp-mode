@@ -428,18 +428,9 @@ The MARKERS and PREFIX value will be attached to each candidate."
   (when (or (--some (lsp--client-completion-in-comments? (lsp--workspace-client it))
                     (lsp-workspaces))
             (not (nth 4 (syntax-ppss))))
-    (let* ((trigger-chars (->> (lsp--server-capabilities)
-                               (lsp:server-capabilities-completion-provider?)
-                               (lsp:completion-options-trigger-characters?)))
-           (bounds-start (or (-some--> (cl-first (bounds-of-thing-at-point 'symbol))
-                               (save-excursion
-                                 (ignore-errors
-                                   (goto-char (+ it 1))
-                                   (while (lsp-completion--looking-back-trigger-characterp
-                                           trigger-chars)
-                                     (cl-incf it)
-                                     (forward-char))
-                                   it)))
+    (let* ((trigger-chars (-> (lsp--capability-for-method "textDocument/completion")
+                              (lsp:completion-options-trigger-characters?)))
+           (bounds-start (or (cl-first (bounds-of-thing-at-point 'symbol))
                              (point)))
            result done?
            (candidates
@@ -475,16 +466,16 @@ The MARKERS and PREFIX value will be attached to each candidate."
                                              ((lsp-completion-list? resp)
                                               (lsp:completion-list-items resp))
                                              (t resp))
-                                         (if (or completed
-                                                 (seq-some #'lsp:completion-item-sort-text? it))
-                                             (lsp-completion--sort-completions it)
-                                           it)
-                                         (-map (lambda (item)
-                                                 (lsp-put item
-                                                          :_emacsStartPoint
-                                                          (or (lsp-completion--guess-prefix item)
-                                                              bounds-start)))
-                                               it))))
+                                            (if (or completed
+                                                    (seq-some #'lsp:completion-item-sort-text? it))
+                                                (lsp-completion--sort-completions it)
+                                              it)
+                                            (-map (lambda (item)
+                                                    (lsp-put item
+                                                             :_emacsStartPoint
+                                                             (or (lsp-completion--guess-prefix item)
+                                                                 bounds-start)))
+                                                  it))))
                               (markers (list bounds-start (copy-marker (point) t)))
                               (prefix (buffer-substring-no-properties bounds-start (point)))
                               (lsp-completion--no-reordering (not lsp-completion-sort-initial-results)))
@@ -513,36 +504,29 @@ The MARKERS and PREFIX value will be attached to each candidate."
        (point)
        (lambda (probe pred action)
          (cond
-          ;; metadata
-          ((equal action 'metadata)
-           `(metadata (category . lsp-capf)
+          ((eq action 'metadata)
+           '(metadata (category . lsp-capf)
                       (display-sort-function . identity)
                       (cycle-sort-function . identity)))
-          ;; boundaries
-          ((equal (car-safe action) 'boundaries) nil)
-          ;; try-completion
-          ((null action)
-           (when-let ((cands (funcall candidates)))
-             (if (cl-rest cands) probe (cl-first cands))))
-          ;; test-completion: not return exact match so that the selection will
-          ;; always be shown
-          ((equal action 'lambda) nil)
-          ;; retrieve candidates
-          ((equal action t)
-           (all-completions probe (funcall candidates) pred))))
+          ((eq (car-safe action) 'boundaries) nil)
+          (t
+           (complete-with-action action (funcall candidates) probe pred))))
        :annotation-function #'lsp-completion--annotate
        :company-kind #'lsp-completion--candidate-kind
        :company-deprecated #'lsp-completion--candidate-deprecated
        :company-require-match 'never
        :company-prefix-length
        (save-excursion
-         (goto-char bounds-start)
          (and (lsp-completion--looking-back-trigger-characterp trigger-chars) t))
        :company-match #'lsp-completion--company-match
        :company-doc-buffer (-compose #'lsp-doc-buffer
                                      #'lsp-completion--get-documentation)
        :exit-function
        (-rpartial #'lsp-completion--exit-fn candidates)))))
+
+(defun lsp-completion--find-workspace (server-id)
+  (--first (eq (lsp--client-server-id (lsp--workspace-client it)) server-id)
+           (lsp-workspaces)))
 
 (defun lsp-completion--exit-fn (candidate _status &optional candidates)
   "Exit function of `completion-at-point'.
@@ -556,11 +540,17 @@ Others: CANDIDATES"
               ((&plist 'lsp-completion-item item
                        'lsp-completion-start-point start-point
                        'lsp-completion-markers markers
+                       'lsp-completion-resolved resolved
                        'lsp-completion-prefix prefix)
                (text-properties-at 0 candidate))
               ((&CompletionItem? :label :insert-text? :text-edit? :insert-text-format?
                                  :additional-text-edits? :insert-text-mode? :command?)
-               item))
+               ;; see #3498 typescript-language-server does not provide the
+               ;; proper insertText without resolving.
+               (if (and (lsp-completion--find-workspace 'ts-ls)
+                        (not resolved))
+                   (lsp-completion--resolve item)
+                 item)))
         (cond
          (text-edit?
           (apply #'delete-region markers)
